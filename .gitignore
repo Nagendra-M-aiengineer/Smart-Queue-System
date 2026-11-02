@@ -1,0 +1,23 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Vite build output
+smart-queue-app/dist/
+smart-queue-app/.vite/
+
+# Broken folder from failed scaffold
+cUsersNagendra MOneDriveDesktopProjectsSmart Queue Systemsmart-queue-app/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
