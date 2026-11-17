@@ -1,13 +1,8 @@
-# Node
+# Node & Build artifacts
 node_modules/
 npm-debug.log*
-
-# Vite build output
-smart-queue-app/dist/
-smart-queue-app/.vite/
-
-# Broken folder from failed scaffold
-cUsersNagendra MOneDriveDesktopProjectsSmart Queue Systemsmart-queue-app/
+dist/
+smart-queue-app/
 
 # Environment
 .env
@@ -21,3 +16,6 @@ cUsersNagendra MOneDriveDesktopProjectsSmart Queue Systemsmart-queue-app/
 # OS
 .DS_Store
 Thumbs.db
+
+# Vercel
+.vercel
