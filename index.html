@@ -3,196 +3,1069 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Manipal Hospitals – Smart Queue System</title>
+  <title>Manipal Hospitals – Smart Queue Management System</title>
+  <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React 18 & Babel CDN -->
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            manipal: {
+              50: '#f0f7fc',
+              100: '#e0eff9',
+              200: '#b9def2',
+              500: '#0284c7',
+              700: '#0369a1',
+              800: '#075985',
+              900: '#004a7c',
+              dark: '#003359'
+            }
+          }
+        }
+      }
+    }
+  </script>
+
   <style>
-    body { margin: 0; font-family: system-ui, sans-serif; }
+    @keyframes pulse-subtle {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.85; transform: scale(1.02); }
+    }
+    .pulse-alert {
+      animation: pulse-subtle 2s infinite ease-in-out;
+    }
+    /* Custom scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
   </style>
 </head>
-<body>
+<body class="bg-gradient-to-br from-slate-50 via-blue-50/40 to-sky-50 text-slate-800 min-h-screen antialiased">
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState } = React;
+    const { useState, useEffect, useMemo, useRef } = React;
 
-    /* ── helpers ── */
+    // ==========================================
+    // Hospital Master Data & Constants
+    // ==========================================
+    const HOSPITAL_INFO = {
+      name: "Manipal Hospitals",
+      tagline: "Life's On",
+      branch: "Old Airport Road, Bengaluru",
+      accreditation: "NABH & JCI Accredited • 700+ Beds • 60+ Specialties",
+      phone: "+91 80 2502 4444"
+    };
+
+    const DEPARTMENTS = [
+      { id: "all", name: "All Departments" },
+      { id: "Cardiology", name: "Cardiology", defaultDoctor: "Dr. Manish Rai", room: "Room 204" },
+      { id: "Cardiac Surgery", name: "Cardiac Surgery", defaultDoctor: "Dr. Devi Shetty", room: "Room 101" },
+      { id: "ER", name: "Emergency / ER", defaultDoctor: "Emergency Triage", room: "Triage Bay 1" },
+      { id: "Nephrology", name: "Nephrology", defaultDoctor: "Dr. Sudarshan Ballal", room: "Room 305" },
+      { id: "Neurology", name: "Neurology", defaultDoctor: "Dr. Arvind Sharma", room: "Room 402" },
+      { id: "Orthopedics", name: "Orthopedics", defaultDoctor: "Dr. Rajesh Kumar", room: "Room 108" }
+    ];
+
+    const DOCTORS = [
+      { name: "Dr. Manish Rai", dept: "Cardiology", room: "Room 204" },
+      { name: "Dr. Devi Shetty", dept: "Cardiac Surgery", room: "Room 101" },
+      { name: "Dr. Sudarshan Ballal", dept: "Nephrology", room: "Room 305" },
+      { name: "Dr. Arvind Sharma", dept: "Neurology", room: "Room 402" },
+      { name: "Dr. Rajesh Kumar", dept: "Orthopedics", room: "Room 108" },
+      { name: "Emergency Triage", dept: "ER", room: "Triage Bay 1" }
+    ];
+
+    const TIME_SLOTS = [
+      "09:00", "09:20", "09:40", "10:00", "10:20",
+      "10:40", "11:00", "11:20", "11:40", "12:00",
+      "12:20", "12:40", "14:00", "14:20", "14:40"
+    ];
+
+    // Priority sorting comparator
+    function priorityComparator(a, b) {
+      const aUrgent = a.priority === "Urgent" || a.emergency ? 0 : 1;
+      const bUrgent = b.priority === "Urgent" || b.emergency ? 0 : 1;
+      if (aUrgent !== bUrgent) return aUrgent - bUrgent;
+      return a.time.localeCompare(b.time);
+    }
+
     function parseToken(label) {
-      if (typeof label !== "string" || !label.startsWith("#")) return null;
-      const n = parseInt(label.slice(1), 10);
-      return Number.isNaN(n) ? null : n;
+      if (!label || typeof label !== "string" || !label.startsWith("#")) return null;
+      const num = parseInt(label.replace("#", ""), 10);
+      return Number.isNaN(num) ? null : num;
     }
 
-    /* ── tiny UI primitives ── */
-    function Card({ className = "", children }) {
-      return (
-        <div className={`rounded-2xl border bg-white shadow-lg ${className}`}>
-          {children}
-        </div>
-      );
+    // Voice announcement helper
+    function announceAudio(text) {
+      if ("speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 0.95;
+        utterance.pitch = 1.05;
+        window.speechSynthesis.speak(utterance);
+      }
     }
 
-    function Button({ className = "", onClick, children }) {
-      return (
-        <button
-          onClick={onClick}
-          className={`inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium
-                      bg-blue-600 text-white hover:bg-blue-700 transition-colors ${className}`}
-        >
-          {children}
-        </button>
-      );
-    }
-
-    function Progress({ value = 0 }) {
-      return (
-        <div className="relative h-2 w-full overflow-hidden rounded-full bg-blue-200 mt-2">
-          <div
-            className="h-full bg-blue-600 transition-all"
-            style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
-          />
-        </div>
-      );
-    }
-
-    /* ── main app ── */
-    function HealthcareApp() {
-      const [token]        = useState(23);
-      const [ahead, setAhead] = useState(4);
-      const avgConsultMins = 7;
-      const estimatedWait  = Math.max(0, ahead * avgConsultMins);
-
+    // ==========================================
+    // Main Hospital App Component
+    // ==========================================
+    function ManipalSmartQueueApp() {
+      // User Patient details
+      const [myToken, setMyToken] = useState(23);
+      const [viewMode, setViewMode] = useState("dual"); // "dual" | "patient" | "doctor"
+      const [avgConsultMins, setAvgConsultMins] = useState(7);
       const [currentToken, setCurrentToken] = useState(22);
+      const [activeDeptFilter, setActiveDeptFilter] = useState("all");
+      const [searchQuery, setSearchQuery] = useState("");
+      const [isModalOpen, setIsModalOpen] = useState(false);
+      const [soundEnabled, setSoundEnabled] = useState(true);
+      const [currentTime, setCurrentTime] = useState(new Date());
+      const [toasts, setToasts] = useState([]);
+      const [completedCount, setCompletedCount] = useState(14);
+      const [activeConsultation, setActiveConsultation] = useState(null);
+
+      // Appointments list
       const [appointments, setAppointments] = useState([
-        { time: "10:00", patient: "#21", doctor: "Dr. Manish Rai", dept: "Cardiology",      priority: "Normal" },
-        { time: "10:20", patient: "#22", doctor: "Dr. Manish Rai", dept: "Cardiology",      priority: "Normal" },
-        { time: "10:40", patient: "Emergency", doctor: "Triage",   dept: "ER",              priority: "Urgent", emergency: true },
-        { time: "11:00", patient: "#23", doctor: "Dr. Manish Rai", dept: "Cardiology",      priority: "Normal" },
+        {
+          id: 1,
+          time: "10:00",
+          patient: "#21",
+          name: "Ramesh Sharma",
+          doctor: "Dr. Manish Rai",
+          dept: "Cardiology",
+          room: "Room 204",
+          priority: "Normal",
+          status: "Waiting"
+        },
+        {
+          id: 2,
+          time: "10:20",
+          patient: "#22",
+          name: "Anita Deshmukh",
+          doctor: "Dr. Manish Rai",
+          dept: "Cardiology",
+          room: "Room 204",
+          priority: "Normal",
+          status: "In Consultation"
+        },
+        {
+          id: 3,
+          time: "10:40",
+          patient: "#99",
+          name: "Cardiac Emergency",
+          doctor: "Emergency Triage",
+          dept: "ER",
+          room: "Triage Bay 1",
+          priority: "Urgent",
+          emergency: true,
+          status: "Urgent Queue"
+        },
+        {
+          id: 4,
+          time: "11:00",
+          patient: "#23",
+          name: "Nagendra M (You)",
+          doctor: "Dr. Manish Rai",
+          dept: "Cardiology",
+          room: "Room 204",
+          priority: "Normal",
+          status: "Waiting"
+        },
+        {
+          id: 5,
+          time: "11:20",
+          patient: "#24",
+          name: "Suresh Hegde",
+          doctor: "Dr. Devi Shetty",
+          dept: "Cardiac Surgery",
+          room: "Room 101",
+          priority: "Normal",
+          status: "Waiting"
+        },
+        {
+          id: 6,
+          time: "11:40",
+          patient: "#25",
+          name: "Priya Venkatesh",
+          doctor: "Dr. Sudarshan Ballal",
+          dept: "Nephrology",
+          room: "Room 305",
+          priority: "Normal",
+          status: "Waiting"
+        }
       ]);
 
-      const handleNext = () => {
-        setAppointments(prev => {
-          if (prev.length === 0) return prev;
-          const [served, ...rest] = prev;
-          const parsed = parseToken(served.patient);
-          if (parsed != null) setCurrentToken(parsed);
-          else setCurrentToken(t => t + 1);
-          setAhead(a => Math.max(0, a - 1));
-          return rest;
+      // Form State for new booking
+      const [formData, setFormData] = useState({
+        name: "",
+        dept: "Cardiology",
+        doctor: "Dr. Manish Rai",
+        room: "Room 204",
+        time: "12:00",
+        priority: "Normal",
+        emergency: false
+      });
+
+      // Live digital clock timer
+      useEffect(() => {
+        const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+        return () => clearInterval(timer);
+      }, []);
+
+      // Toast notification helper
+      const showToast = (message, type = "info") => {
+        const id = Date.now();
+        setToasts((prev) => [...prev, { id, message, type }]);
+        setTimeout(() => {
+          setToasts((prev) => prev.filter((t) => t.id !== id));
+        }, 3500);
+      };
+
+      // Calculate Patient's queue position dynamically
+      const myIndexInQueue = useMemo(() => {
+        return appointments.findIndex((a) => a.patient === `#${myToken}`);
+      }, [appointments, myToken]);
+
+      const aheadCount = myIndexInQueue >= 0 ? myIndexInQueue : 0;
+      const estimatedWaitTime = Math.max(0, aheadCount * avgConsultMins);
+
+      // Filtered appointments for doctor dashboard
+      const filteredAppointments = useMemo(() => {
+        return appointments.filter((app) => {
+          const matchesDept = activeDeptFilter === "all" || app.dept === activeDeptFilter;
+          const matchesSearch =
+            app.patient.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            app.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            app.doctor.toLowerCase().includes(searchQuery.toLowerCase());
+          return matchesDept && matchesSearch;
         });
+      }, [appointments, activeDeptFilter, searchQuery]);
+
+      // Handlers
+      const handleNextPatient = () => {
+        if (appointments.length === 0) {
+          showToast("No more patients waiting in the queue.", "info");
+          return;
+        }
+
+        const [served, ...rest] = appointments;
+        const parsed = parseToken(served.patient);
+        const nextTokenVal = parsed !== null ? parsed : currentToken + 1;
+
+        setCurrentToken(nextTokenVal);
+        setCompletedCount((c) => c + 1);
+        setActiveConsultation(served);
+        setAppointments(rest);
+
+        const announcementText = `Calling token ${served.patient}, ${served.name}. Please proceed to ${served.room}.`;
+        if (soundEnabled) announceAudio(announcementText);
+
+        showToast(`Next patient called: ${served.patient} (${served.name}) → ${served.room}`, "success");
+      };
+
+      const handleCallPatient = (app) => {
+        const text = `Token number ${app.patient}, ${app.name}, please report to ${app.room}, ${app.doctor}.`;
+        if (soundEnabled) announceAudio(text);
+        showToast(`Calling ${app.patient} to ${app.room}`, "info");
+      };
+
+      const handleStartConsultation = (id) => {
+        setAppointments((prev) =>
+          prev.map((a) => (a.id === id ? { ...a, status: "In Consultation" } : a))
+        );
+        showToast("Consultation in progress.", "info");
+      };
+
+      const handleSendToLab = (id, patient) => {
+        setAppointments((prev) =>
+          prev.map((a) => (a.id === id ? { ...a, status: "Diagnostics / Lab" } : a))
+        );
+        showToast(`${patient} redirected to Central Pathology & Diagnostic Lab.`, "warning");
+      };
+
+      // Patient Self Service: Step Out / Delay
+      const handleDelayTurn = () => {
+        if (myIndexInQueue === -1) return;
+        setAppointments((prev) => {
+          const list = [...prev];
+          const [patientApp] = list.splice(myIndexInQueue, 1);
+          const newPos = Math.min(list.length, myIndexInQueue + 2);
+          list.splice(newPos, 0, patientApp);
+          return list;
+        });
+        showToast("Your turn has been deferred by 2 slots (+15 mins).", "info");
+      };
+
+      // Patient Self Service: Request Nurse
+      const handleRequestNurse = () => {
+        showToast("Nurse assistance alert dispatched to OPD Waiting Lounge A.", "warning");
+        if (soundEnabled) announceAudio("Nurse assistance requested at OPD waiting area.");
+      };
+
+      // Patient Self Service: Announce Token
+      const handleAnnounceMyToken = () => {
+        const text = `Attention patient token number ${myToken}. You are currently ${aheadCount} patient${aheadCount === 1 ? "" : "s"} away from consultation. Estimated wait: ${estimatedWaitTime} minutes.`;
+        announceAudio(text);
+        showToast("Audio announcement played.", "info");
+      };
+
+      // Add new appointment
+      const handleBookAppointment = (e) => {
+        e.preventDefault();
+        if (!formData.name.trim()) {
+          showToast("Please enter patient name", "warning");
+          return;
+        }
+
+        const nextNum = Math.floor(Math.random() * 50) + 30;
+        const newApp = {
+          id: Date.now(),
+          time: formData.time,
+          patient: `#${nextNum}`,
+          name: formData.name,
+          doctor: formData.doctor,
+          dept: formData.dept,
+          room: formData.room,
+          priority: formData.priority,
+          emergency: formData.priority === "Urgent",
+          status: "Waiting"
+        };
+
+        const updated = [...appointments, newApp].sort(priorityComparator);
+        setAppointments(updated);
+        setIsModalOpen(false);
+        setFormData({
+          name: "",
+          dept: "Cardiology",
+          doctor: "Dr. Manish Rai",
+          room: "Room 204",
+          time: "12:00",
+          priority: "Normal",
+          emergency: false
+        });
+
+        showToast(`Token #${nextNum} generated for ${newApp.name} (${newApp.dept})`, "success");
+        if (newApp.priority === "Urgent" && soundEnabled) {
+          announceAudio(`Urgent triage booking added for ${newApp.name}`);
+        }
+      };
+
+      // Auto update doctor & room when department changes in form
+      const handleDeptChange = (deptName) => {
+        const found = DEPARTMENTS.find((d) => d.name === deptName);
+        if (found) {
+          setFormData((prev) => ({
+            ...prev,
+            dept: deptName,
+            doctor: found.defaultDoctor || "Senior Consultant",
+            room: found.room || "OPD Bay"
+          }));
+        }
       };
 
       return (
-        <div className="p-6 grid gap-6 md:grid-cols-2 bg-gradient-to-br from-blue-50 to-white min-h-screen">
+        <div className="min-h-screen flex flex-col font-sans">
 
-          {/* ── Header ── */}
-          <div className="md:col-span-2 text-center mb-2">
-            <h1 className="text-3xl font-extrabold text-blue-800">
-              Manipal Hospitals Smart Queue System
-            </h1>
-            <p className="text-sm text-gray-500 mt-1">
-              Old Airport Road, Bengaluru &bull; NABH Accredited &bull; 700+ Beds &bull; 60+ Specialties
-            </p>
+          {/* ======================================================== */}
+          {/* Top Hospital Emergency & Announcement Ticker              */}
+          {/* ======================================================== */}
+          <div className="bg-manipal-dark text-white text-xs py-1.5 px-4 flex flex-wrap justify-between items-center border-b border-sky-900/50">
+            <div className="flex items-center gap-2">
+              <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span className="font-semibold text-sky-200">OPD QUEUE DISPATCH:</span>
+              <span className="truncate max-w-xs md:max-w-xl text-slate-200">
+                Central OPD Wings A & B active • Emergency Triage 24x7 Operational • Helpline: {HOSPITAL_INFO.phone}
+              </span>
+            </div>
+            <div className="flex items-center gap-4 text-sky-200">
+              <span>{currentTime.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" })}</span>
+              <span className="font-mono bg-sky-950/80 px-2 py-0.5 rounded text-sky-300 font-semibold">
+                {currentTime.toLocaleTimeString("en-IN")}
+              </span>
+            </div>
           </div>
 
-          {/* ── Patient App ── */}
-          <Card className="border-blue-100">
-            <div className="p-6">
-              <h2 className="text-xl font-bold mb-4 text-blue-700">📱 Patient App</h2>
-
-              {/* Queue Tracker */}
-              <div className="p-4 bg-gradient-to-r from-blue-100 to-blue-50 rounded-xl border border-blue-200 mb-4">
-                <h3 className="font-semibold mb-1 text-blue-800">🎟️ Queue Tracker</h3>
-                <p>Token Number: <b>#{token}</b></p>
-                <p>Ahead of You: <b>{ahead} patients</b></p>
-                <p>Estimated Wait: <b>{estimatedWait} mins</b></p>
-                <Progress value={((5 - Math.min(5, ahead)) / 5) * 100} />
+          {/* ======================================================== */}
+          {/* Main Navigation Header                                   */}
+          {/* ======================================================== */}
+          <header className="bg-white/90 backdrop-blur sticky top-0 z-30 shadow-sm border-b border-sky-100">
+            <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-4">
+              
+              {/* Brand Logo & Details */}
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-manipal-900 via-manipal-700 to-sky-500 text-white flex items-center justify-center font-black text-xl shadow-md shadow-sky-600/20">
+                  🏥
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h1 className="text-xl md:text-2xl font-black text-manipal-900 tracking-tight">
+                      MANIPAL HOSPITALS
+                    </h1>
+                    <span className="hidden sm:inline-block bg-sky-100 text-sky-800 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border border-sky-200">
+                      Smart Queue 2.0
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    {HOSPITAL_INFO.branch} &bull; {HOSPITAL_INFO.accreditation}
+                  </p>
+                </div>
               </div>
 
-              {/* Upcoming Appointment */}
-              {appointments.length > 0 && (
-                <div className="p-4 bg-white rounded-xl border shadow">
-                  <h3 className="font-semibold mb-1">🗓️ Upcoming Appointment</h3>
-                  <p>
-                    {appointments[0].doctor} ({appointments[0].dept})
-                    {appointments[0].priority === "Urgent" && (
-                      <span className="text-red-600 font-semibold ml-1">• Urgent</span>
-                    )}
-                  </p>
-                  <p>
-                    Date: <b>2025-08-20</b> &bull; Slot: <b>{appointments[0].time}</b> &bull; Token: <b>{appointments[0].patient}</b>
-                  </p>
-                  <div className="mt-3">
-                    <Button className="bg-green-600 hover:bg-green-700" onClick={handleNext}>
-                      ✅ Next
-                    </Button>
-                  </div>
+              {/* View Switcher & Action Buttons */}
+              <div className="flex items-center flex-wrap gap-2">
+                {/* View Switcher Pills */}
+                <div className="bg-slate-100 p-1 rounded-xl flex items-center text-xs font-semibold">
+                  <button
+                    onClick={() => setViewMode("dual")}
+                    className={`px-3 py-1.5 rounded-lg transition-all ${
+                      viewMode === "dual"
+                        ? "bg-white text-manipal-900 shadow-sm font-bold"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    🔄 Dual View
+                  </button>
+                  <button
+                    onClick={() => setViewMode("patient")}
+                    className={`px-3 py-1.5 rounded-lg transition-all ${
+                      viewMode === "patient"
+                        ? "bg-white text-manipal-900 shadow-sm font-bold"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    📱 Patient Kiosk
+                  </button>
+                  <button
+                    onClick={() => setViewMode("doctor")}
+                    className={`px-3 py-1.5 rounded-lg transition-all ${
+                      viewMode === "doctor"
+                        ? "bg-white text-manipal-900 shadow-sm font-bold"
+                        : "text-slate-600 hover:text-slate-900"
+                    }`}
+                  >
+                    💻 Doctor Console
+                  </button>
                 </div>
-              )}
 
-              {appointments.length === 0 && (
-                <div className="p-4 bg-green-50 rounded-xl border border-green-200 text-green-700 text-center font-semibold">
-                  🎉 All appointments completed!
-                </div>
-              )}
+                {/* Sound Toggle */}
+                <button
+                  onClick={() => setSoundEnabled(!soundEnabled)}
+                  title={soundEnabled ? "Voice announcements enabled" : "Voice muted"}
+                  className={`p-2 rounded-xl border text-sm transition-all ${
+                    soundEnabled
+                      ? "bg-sky-50 border-sky-200 text-manipal-700"
+                      : "bg-slate-100 border-slate-200 text-slate-400"
+                  }`}
+                >
+                  {soundEnabled ? "🔊" : "🔇"}
+                </button>
+
+                {/* Book Appointment Modal Button */}
+                <button
+                  onClick={() => setIsModalOpen(true)}
+                  className="bg-gradient-to-r from-manipal-700 to-manipal-900 hover:from-manipal-800 hover:to-manipal-dark text-white text-xs font-bold px-4 py-2 rounded-xl shadow-md shadow-sky-900/10 transition-all flex items-center gap-1.5"
+                >
+                  <span>➕</span>
+                  <span>Book Appointment</span>
+                </button>
+              </div>
+
             </div>
-          </Card>
+          </header>
 
-          {/* ── Doctor Dashboard ── */}
-          <Card>
-            <div className="p-6">
-              <h2 className="text-xl font-bold mb-4 text-green-700">💻 Doctor Dashboard</h2>
+          {/* ======================================================== */}
+          {/* Main Dashboard Workspace                                 */}
+          {/* ======================================================== */}
+          <main className="max-w-7xl mx-auto px-4 py-6 w-full flex-1">
 
-              {/* Appointments list */}
-              <div className="mb-4 p-4 bg-green-50 rounded-xl">
-                <h3 className="font-semibold mb-2">📋 Today's Appointments</h3>
-                {appointments.length === 0 ? (
-                  <p className="text-gray-500 text-sm">No appointments remaining.</p>
-                ) : (
-                  <ul className="space-y-1 text-sm">
-                    {appointments.map((a, idx) => (
-                      <li
-                        key={idx}
-                        className={`flex items-center gap-2 ${
-                          a.priority === "Urgent" || a.emergency
-                            ? "font-bold text-red-600"
-                            : "text-gray-700"
+            {/* Quick Metrics KPI Bar */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3 mb-6">
+              
+              <div className="bg-white p-3.5 rounded-2xl border border-sky-100 shadow-sm">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Current Serving</span>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <span className="text-2xl font-black text-manipal-800">#{currentToken}</span>
+                  <span className="text-xs text-emerald-600 font-semibold bg-emerald-50 px-1.5 py-0.5 rounded">Active</span>
+                </div>
+              </div>
+
+              <div className="bg-white p-3.5 rounded-2xl border border-sky-100 shadow-sm">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">In Waiting</span>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <span className="text-2xl font-black text-slate-800">{appointments.length}</span>
+                  <span className="text-xs text-slate-500 font-medium">Patients</span>
+                </div>
+              </div>
+
+              <div className="bg-white p-3.5 rounded-2xl border border-sky-100 shadow-sm">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Urgent / ER</span>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <span className="text-2xl font-black text-red-600">
+                    {appointments.filter((a) => a.priority === "Urgent" || a.emergency).length}
+                  </span>
+                  <span className="text-xs text-red-600 font-semibold bg-red-50 px-1.5 py-0.5 rounded">Priority</span>
+                </div>
+              </div>
+
+              <div className="bg-white p-3.5 rounded-2xl border border-sky-100 shadow-sm">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Avg Consult</span>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <span className="text-2xl font-black text-sky-700">{avgConsultMins}</span>
+                  <span className="text-xs text-slate-500 font-medium">min / patient</span>
+                </div>
+              </div>
+
+              <div className="bg-white p-3.5 rounded-2xl border border-sky-100 shadow-sm col-span-2 sm:col-span-4 lg:col-span-1">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Served Today</span>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <span className="text-2xl font-black text-emerald-600">{completedCount}</span>
+                  <span className="text-xs text-emerald-600 font-semibold bg-emerald-50 px-1.5 py-0.5 rounded">Completed</span>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Layout Grid according to View Mode */}
+            <div className={`grid gap-6 ${
+              viewMode === "dual"
+                ? "lg:grid-cols-12"
+                : "grid-cols-1 max-w-4xl mx-auto"
+            }`}>
+
+              {/* ======================================================== */}
+              {/* LEFT COLUMN: PATIENT APP PORTAL                          */}
+              {/* ======================================================== */}
+              {(viewMode === "dual" || viewMode === "patient") && (
+                <div className={`${viewMode === "dual" ? "lg:col-span-5" : "w-full"} space-y-5`}>
+                  
+                  {/* Patient App Header Card */}
+                  <div className="bg-gradient-to-br from-white to-sky-50/50 rounded-2xl border border-sky-100 shadow-md p-6 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-sky-100/50 rounded-full blur-2xl -z-0 pointer-events-none"></div>
+
+                    <div className="flex items-center justify-between mb-4 relative z-10">
+                      <div className="flex items-center gap-2">
+                        <span className="p-2 rounded-xl bg-sky-100 text-manipal-700 text-lg">📱</span>
+                        <div>
+                          <h2 className="text-lg font-bold text-manipal-900 leading-tight">Patient Queue Portal</h2>
+                          <p className="text-xs text-slate-500">Live token tracker & self-service</p>
+                        </div>
+                      </div>
+                      <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>
+                        Live Track
+                      </span>
+                    </div>
+
+                    {/* Token Card Highlight */}
+                    <div className="p-5 rounded-2xl bg-gradient-to-br from-manipal-900 via-manipal-800 to-sky-800 text-white shadow-lg relative overflow-hidden">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <span className="text-xs uppercase tracking-wider text-sky-200 font-semibold">Your Token Number</span>
+                          <div className="text-4xl font-extrabold text-white mt-1 tracking-tight">
+                            #{myToken}
+                          </div>
+                          <p className="text-xs text-sky-200 mt-1">Nagendra M &bull; Cardiology OPD</p>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[11px] bg-white/20 px-2 py-0.5 rounded-full text-sky-100 font-medium">Room 204</span>
+                          <p className="text-xs text-sky-200 mt-2 font-semibold">Dr. Manish Rai</p>
+                        </div>
+                      </div>
+
+                      {/* Ahead & Estimated Wait Info */}
+                      <div className="grid grid-cols-2 gap-3 mt-5 pt-4 border-t border-white/15">
+                        <div>
+                          <span className="text-xs text-sky-200">Ahead in Queue</span>
+                          <p className="text-xl font-bold text-white mt-0.5">
+                            {aheadCount > 0 ? `${aheadCount} patients` : "You're Next! 🎉"}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="text-xs text-sky-200">Estimated Wait</span>
+                          <p className="text-xl font-bold text-amber-300 mt-0.5">
+                            {aheadCount > 0 ? `~${estimatedWaitTime} mins` : "Now Ready"}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Progress bar */}
+                      <div className="mt-4">
+                        <div className="flex justify-between text-[11px] text-sky-200 mb-1">
+                          <span>Queue Progress</span>
+                          <span>{Math.round(((6 - Math.min(6, aheadCount)) / 6) * 100)}%</span>
+                        </div>
+                        <div className="w-full h-2.5 bg-black/20 rounded-full overflow-hidden p-0.5">
+                          <div
+                            className="h-full bg-gradient-to-r from-emerald-400 to-sky-300 rounded-full transition-all duration-500"
+                            style={{ width: `${Math.max(10, ((6 - Math.min(6, aheadCount)) / 6) * 100)}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Patient Interactive Action Controls */}
+                    <div className="mt-4 pt-2">
+                      <span className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">Self-Service Actions</span>
+                      <div className="grid grid-cols-3 gap-2">
+                        <button
+                          onClick={handleAnnounceMyToken}
+                          className="flex flex-col items-center justify-center p-3 rounded-xl border border-sky-200 bg-sky-50/60 hover:bg-sky-100 text-manipal-800 transition-all text-center"
+                        >
+                          <span className="text-lg mb-1">🔔</span>
+                          <span className="text-[11px] font-bold">Announce</span>
+                          <span className="text-[9px] text-slate-500">Audio chime</span>
+                        </button>
+
+                        <button
+                          onClick={handleDelayTurn}
+                          className="flex flex-col items-center justify-center p-3 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 transition-all text-center"
+                        >
+                          <span className="text-lg mb-1">⏳</span>
+                          <span className="text-[11px] font-bold">Step Out</span>
+                          <span className="text-[9px] text-slate-500">Delay +15 min</span>
+                        </button>
+
+                        <button
+                          onClick={handleRequestNurse}
+                          className="flex flex-col items-center justify-center p-3 rounded-xl border border-amber-200 bg-amber-50/80 hover:bg-amber-100 text-amber-800 transition-all text-center"
+                        >
+                          <span className="text-lg mb-1">🆘</span>
+                          <span className="text-[11px] font-bold">Call Nurse</span>
+                          <span className="text-[9px] text-slate-500">Assistance</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Upcoming Appointment Details */}
+                    <div className="mt-5 p-4 rounded-xl border border-sky-100 bg-white shadow-sm">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Appointment Summary</span>
+                        <span className="text-xs font-semibold text-sky-700 bg-sky-50 px-2 py-0.5 rounded-full">
+                          Slot: 11:00 AM
+                        </span>
+                      </div>
+                      <div className="text-sm space-y-1">
+                        <p className="font-semibold text-slate-800">Dr. Manish Rai (Cardiology)</p>
+                        <p className="text-xs text-slate-500">OPD Block B, 2nd Floor &bull; Consultation Room 204</p>
+                        <p className="text-xs text-slate-500">Patient: <span className="font-semibold text-slate-700">Nagendra M</span> (UHID: MH-2026-8941)</p>
+                      </div>
+
+                      <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
+                        <span className="text-xs text-slate-500">Status: <b className="text-emerald-700 font-semibold">Checked In</b></span>
+                        <button
+                          onClick={handleNextPatient}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs px-3 py-1.5 rounded-lg transition-all shadow-sm shadow-emerald-700/20"
+                        >
+                          Simulate Advance ➡️
+                        </button>
+                      </div>
+                    </div>
+
+                  </div>
+
+                  {/* Hospital Guidance Notice Card */}
+                  <div className="bg-white rounded-2xl border border-sky-100 p-4 shadow-sm text-xs text-slate-600 space-y-2">
+                    <div className="flex items-center gap-2 text-manipal-800 font-bold">
+                      <span>💡</span>
+                      <span>Hospital Visit Guidelines</span>
+                    </div>
+                    <ul className="list-disc list-inside space-y-1 text-slate-500">
+                      <li>Please keep prior ECG and lab reports ready before your turn.</li>
+                      <li>Vital signs (Blood Pressure & Pulse) check will be done by the triage nurse.</li>
+                      <li>Pharmacy & Diagnostic Lab are located on the Ground Floor, Wing A.</li>
+                    </ul>
+                  </div>
+
+                </div>
+              )}
+
+              {/* ======================================================== */}
+              {/* RIGHT COLUMN: DOCTOR CLINICAL DASHBOARD                  */}
+              {/* ======================================================== */}
+              {(viewMode === "dual" || viewMode === "doctor") && (
+                <div className={`${viewMode === "dual" ? "lg:col-span-7" : "w-full"} space-y-5`}>
+                  
+                  {/* Doctor Console Panel */}
+                  <div className="bg-white rounded-2xl border border-sky-100 shadow-md p-6">
+                    
+                    {/* Header with next button */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 mb-5 pb-4 border-b border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <span className="p-2 rounded-xl bg-emerald-100 text-emerald-800 text-lg">💻</span>
+                        <div>
+                          <h2 className="text-lg font-bold text-slate-900 leading-tight">Doctor Clinical Console</h2>
+                          <p className="text-xs text-slate-500">OPD patient flow & triage control</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={handleNextPatient}
+                          className="bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-md shadow-emerald-700/20 transition-all flex items-center gap-1.5"
+                        >
+                          <span>📢</span>
+                          <span>Call Next Patient</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Department Filters & Search */}
+                    <div className="space-y-3 mb-5">
+                      {/* Department Filter Pills */}
+                      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs font-semibold">
+                        {DEPARTMENTS.map((dept) => (
+                          <button
+                            key={dept.id}
+                            onClick={() => setActiveDeptFilter(dept.id)}
+                            className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-all ${
+                              activeDeptFilter === dept.id
+                                ? "bg-manipal-800 text-white shadow-sm"
+                                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                            }`}
+                          >
+                            {dept.name}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Search Bar & Avg Consult slider */}
+                      <div className="flex flex-wrap items-center gap-3">
+                        <div className="flex-1 min-w-[200px] relative">
+                          <input
+                            type="text"
+                            placeholder="🔍 Search patient, token, doctor..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="w-full text-xs px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent bg-slate-50/50"
+                          />
+                        </div>
+
+                        {/* Average Consult Time Config */}
+                        <div className="flex items-center gap-2 text-xs text-slate-600 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200">
+                          <span className="font-semibold text-slate-700">Consult Speed:</span>
+                          <button
+                            onClick={() => setAvgConsultMins(Math.max(3, avgConsultMins - 1))}
+                            className="w-5 h-5 rounded bg-slate-200 hover:bg-slate-300 font-bold flex items-center justify-center"
+                          >
+                            -
+                          </button>
+                          <span className="font-bold text-sky-800">{avgConsultMins}m</span>
+                          <button
+                            onClick={() => setAvgConsultMins(Math.min(20, avgConsultMins + 1))}
+                            className="w-5 h-5 rounded bg-slate-200 hover:bg-slate-300 font-bold flex items-center justify-center"
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Today's Appointments List */}
+                    <div className="space-y-2.5">
+                      <div className="flex justify-between items-center text-xs font-bold text-slate-400 uppercase tracking-wider px-1">
+                        <span>Patient Queue ({filteredAppointments.length})</span>
+                        <span>Clinical Action</span>
+                      </div>
+
+                      {filteredAppointments.length === 0 ? (
+                        <div className="p-8 text-center rounded-xl bg-slate-50 border border-slate-100 text-slate-500">
+                          <p className="text-2xl mb-1">📋</p>
+                          <p className="font-medium text-sm">No patients found in this queue.</p>
+                          <p className="text-xs text-slate-400 mt-1">Use "Book Appointment" to add a walk-in patient.</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2 max-h-[460px] overflow-y-auto pr-1">
+                          {filteredAppointments.map((app) => {
+                            const isUrgent = app.priority === "Urgent" || app.emergency;
+                            const isCalling = app.status === "In Consultation";
+
+                            return (
+                              <div
+                                key={app.id}
+                                className={`p-3.5 rounded-xl border transition-all flex flex-wrap items-center justify-between gap-3 ${
+                                  isUrgent
+                                    ? "bg-red-50/70 border-red-200 shadow-sm"
+                                    : isCalling
+                                    ? "bg-emerald-50/70 border-emerald-200"
+                                    : "bg-white hover:bg-slate-50/80 border-slate-200/80"
+                                }`}
+                              >
+                                {/* Left Info */}
+                                <div className="flex items-center gap-3">
+                                  <div className={`w-10 h-10 rounded-xl font-bold flex flex-col items-center justify-center text-xs shadow-sm ${
+                                    isUrgent
+                                      ? "bg-red-600 text-white"
+                                      : "bg-sky-100 text-manipal-800"
+                                  }`}>
+                                    <span className="text-[10px] uppercase font-mono">{app.time}</span>
+                                    <span className="font-black">{app.patient}</span>
+                                  </div>
+
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <h4 className="font-bold text-sm text-slate-900">{app.name}</h4>
+                                      {isUrgent && (
+                                        <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-200">
+                                          🚨 Urgent / ER
+                                        </span>
+                                      )}
+                                      {isCalling && (
+                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">
+                                          In Consultation
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-xs text-slate-500">
+                                      {app.doctor} &bull; <span className="font-medium text-slate-700">{app.dept}</span> ({app.room})
+                                    </p>
+                                  </div>
+                                </div>
+
+                                {/* Right Doctor Action Buttons */}
+                                <div className="flex items-center gap-1.5 ml-auto">
+                                  <button
+                                    onClick={() => handleCallPatient(app)}
+                                    title="Voice call patient"
+                                    className="p-1.5 px-2.5 rounded-lg border border-sky-200 bg-sky-50 hover:bg-sky-100 text-manipal-800 text-xs font-semibold transition-all flex items-center gap-1"
+                                  >
+                                    <span>📞</span>
+                                    <span>Call</span>
+                                  </button>
+
+                                  <button
+                                    onClick={() => handleStartConsultation(app.id)}
+                                    title="Mark in consultation"
+                                    className="p-1.5 px-2.5 rounded-lg border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-semibold transition-all flex items-center gap-1"
+                                  >
+                                    <span>🩺</span>
+                                    <span>Start</span>
+                                  </button>
+
+                                  <button
+                                    onClick={() => handleSendToLab(app.id, app.name)}
+                                    title="Refer to Lab / Diagnostics"
+                                    className="p-1.5 px-2.5 rounded-lg border border-purple-200 bg-purple-50 hover:bg-purple-100 text-purple-800 text-xs font-semibold transition-all flex items-center gap-1"
+                                  >
+                                    <span>🔬</span>
+                                    <span className="hidden sm:inline">Lab</span>
+                                  </button>
+                                </div>
+
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                    </div>
+
+                    {/* Bottom Status Feed */}
+                    {activeConsultation && (
+                      <div className="mt-5 p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 flex items-center justify-between text-xs text-emerald-800">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base">👨‍⚕️</span>
+                          <span>
+                            Currently consulting: <b>{activeConsultation.patient} - {activeConsultation.name}</b> with <b>{activeConsultation.doctor}</b>
+                          </span>
+                        </div>
+                        <span className="font-mono font-bold bg-white px-2 py-0.5 rounded shadow-sm">
+                          {activeConsultation.room}
+                        </span>
+                      </div>
+                    )}
+
+                  </div>
+
+                </div>
+              )}
+
+            </div>
+
+          </main>
+
+          {/* ======================================================== */}
+          {/* Modal: Book / Add Walk-in Patient                        */}
+          {/* ======================================================== */}
+          {isModalOpen && (
+            <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-sky-100 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                
+                <div className="bg-gradient-to-r from-manipal-900 to-manipal-700 text-white p-5 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-bold">New OPD Registration</h3>
+                    <p className="text-xs text-sky-200">Book appointment & generate instant token</p>
+                  </div>
+                  <button
+                    onClick={() => setIsModalOpen(false)}
+                    className="w-8 h-8 rounded-full bg-white/20 hover:bg-white/30 text-white font-bold flex items-center justify-center"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <form onSubmit={handleBookAppointment} className="p-6 space-y-4 text-xs">
+                  
+                  {/* Patient Name */}
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">Patient Full Name *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Priya Sharma"
+                      value={formData.name}
+                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-manipal-700"
+                    />
+                  </div>
+
+                  {/* Department Select */}
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">Clinical Department *</label>
+                    <select
+                      value={formData.dept}
+                      onChange={(e) => handleDeptChange(e.target.value)}
+                      className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-manipal-700 bg-white"
+                    >
+                      {DEPARTMENTS.filter((d) => d.id !== "all").map((d) => (
+                        <option key={d.id} value={d.name}>
+                          {d.name} ({d.defaultDoctor})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Doctor & Room */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="font-bold text-slate-700 block mb-1">Doctor Assigned</label>
+                      <input
+                        type="text"
+                        readOnly
+                        value={formData.doctor}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-600 font-semibold cursor-not-allowed"
+                      />
+                    </div>
+                    <div>
+                      <label className="font-bold text-slate-700 block mb-1">Room / Bay</label>
+                      <input
+                        type="text"
+                        readOnly
+                        value={formData.room}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-600 font-semibold cursor-not-allowed"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Slot & Priority */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="font-bold text-slate-700 block mb-1">Preferred Time Slot</label>
+                      <select
+                        value={formData.time}
+                        onChange={(e) => setFormData({ ...formData, time: e.target.value })}
+                        className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-manipal-700 bg-white"
+                      >
+                        {TIME_SLOTS.map((slot) => (
+                          <option key={slot} value={slot}>
+                            {slot}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="font-bold text-slate-700 block mb-1">Triage Priority</label>
+                      <select
+                        value={formData.priority}
+                        onChange={(e) => setFormData({ ...formData, priority: e.target.value })}
+                        className={`w-full px-3 py-2 rounded-xl border font-bold ${
+                          formData.priority === "Urgent"
+                            ? "border-red-400 bg-red-50 text-red-700"
+                            : "border-slate-200 bg-white text-slate-700"
                         }`}
                       >
-                        <span className="w-12 shrink-0">{a.time}</span>
-                        <span>Patient {a.patient} – {a.doctor} ({a.dept})</span>
-                        {a.priority === "Urgent" && (
-                          <span className="ml-auto text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full">
-                            Urgent
-                          </span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
+                        <option value="Normal">Normal (Standard)</option>
+                        <option value="Urgent">🚨 Emergency / Urgent</option>
+                      </select>
+                    </div>
+                  </div>
 
-              {/* Queue Overview */}
-              <div className="p-4 bg-yellow-50 rounded-xl">
-                <h3 className="font-semibold mb-2">📊 Queue Overview</h3>
-                <p>Current Token: <b>#{currentToken}</b></p>
-                <p>Next: <b>#{currentToken + 1}</b></p>
-                <p>Waiting Patients: <b>{appointments.length}</b></p>
-                <div className="mt-3">
-                  <Button onClick={handleNext}>➡️ Next Patient</Button>
-                </div>
+                  {/* Modal Footer buttons */}
+                  <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsModalOpen(false)}
+                      className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 font-semibold hover:bg-slate-50 transition-all"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-4 py-2 rounded-xl bg-manipal-800 hover:bg-manipal-900 text-white font-bold transition-all shadow-md shadow-sky-900/20"
+                    >
+                      Confirm Booking
+                    </button>
+                  </div>
+
+                </form>
+
               </div>
             </div>
-          </Card>
+          )}
+
+          {/* ======================================================== */}
+          {/* Toast Notification Container                             */}
+          {/* ======================================================== */}
+          <div className="fixed bottom-4 right-4 z-50 space-y-2 max-w-sm pointer-events-none">
+            {toasts.map((toast) => (
+              <div
+                key={toast.id}
+                className={`p-3 rounded-xl shadow-lg border text-xs font-semibold pointer-events-auto transition-all animate-in slide-in-from-bottom-2 ${
+                  toast.type === "success"
+                    ? "bg-emerald-800 text-white border-emerald-900"
+                    : toast.type === "warning"
+                    ? "bg-amber-600 text-white border-amber-700"
+                    : "bg-slate-900 text-white border-slate-950"
+                }`}
+              >
+                {toast.message}
+              </div>
+            ))}
+          </div>
+
+          {/* ======================================================== */}
+          {/* Footer                                                   */}
+          {/* ======================================================== */}
+          <footer className="bg-white border-t border-sky-100 text-slate-500 text-xs py-4 px-4 text-center">
+            <p>
+              &copy; {new Date().getFullYear()} {HOSPITAL_INFO.name} &bull; Powered by Smart Queue System &bull; Dedicated to Life, Health, and Well-being.
+            </p>
+          </footer>
 
         </div>
       );
     }
 
-    /* ── mount ── */
-    ReactDOM.createRoot(document.getElementById("root")).render(<HealthcareApp />);
+    // Mount the Application
+    ReactDOM.createRoot(document.getElementById("root")).render(<ManipalSmartQueueApp />);
   </script>
 </body>
 </html>
